@@ -1,0 +1,48 @@
+generator client {
+    provider     = "prisma-client"
+    output       = "../src/generated/prisma"
+    moduleFormat = "esm"
+}
+
+datasource db {
+    provider = "postgresql"
+}
+
+model Customer {
+    id        String     @id @default(uuid()) @db.Uuid
+    name      String
+    email     String     @unique
+    createdAt DateTime   @default(now())
+    updatedAt DateTime   @updatedAt
+    schedules Schedule[]
+
+    @@map("customers")
+}
+
+model Doctor {
+    id        String     @id @default(uuid()) @db.Uuid
+    name      String
+    createdAt DateTime   @default(now())
+    updatedAt DateTime   @updatedAt
+    schedules Schedule[]
+
+    @@map("doctors")
+}
+
+model Schedule {
+    id          String   @id @default(uuid()) @db.Uuid
+    objective   String
+    customerId  String   @db.Uuid
+    doctorId    String   @db.Uuid
+    scheduledAt DateTime
+    createdAt   DateTime @default(now())
+    updatedAt   DateTime @updatedAt
+
+    customer Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
+    doctor   Doctor   @relation(fields: [doctorId], references: [id], onDelete: Restrict)
+
+    // A doctor cannot have two schedules at the same time.
+    @@unique([doctorId, scheduledAt])
+    @@index([customerId])
+    @@map("schedules")
+}

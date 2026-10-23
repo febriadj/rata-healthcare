@@ -1,0 +1,4 @@
+allowBuilds:
+    "@apollo/protobufjs": false
+    "@prisma/engines": true
+    prisma: true

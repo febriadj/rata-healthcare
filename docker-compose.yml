@@ -1,0 +1,104 @@
+services:
+  auth-db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${AUTH_DB_USER:?set AUTH_DB_USER in .env}
+      POSTGRES_PASSWORD: ${AUTH_DB_PASSWORD:?set AUTH_DB_PASSWORD in .env}
+      POSTGRES_DB: ${AUTH_DB_NAME:-auth}
+    volumes:
+      - auth-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - healthcare
+
+  schedule-db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${SCHEDULE_DB_USER:?set SCHEDULE_DB_USER in .env}
+      POSTGRES_PASSWORD: ${SCHEDULE_DB_PASSWORD:?set SCHEDULE_DB_PASSWORD in .env}
+      POSTGRES_DB: ${SCHEDULE_DB_NAME:-schedule}
+    volumes:
+      - schedule-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - healthcare
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # Pure cache: no persistence, bounded memory, least-recently-used eviction.
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - healthcare
+
+  mailpit:
+    image: axllent/mailpit:v1.21
+    restart: unless-stopped
+    ports:
+      - "8025:8025" # web UI to read the emails the services send
+    networks:
+      - healthcare
+
+  auth-service:
+    build: ./auth-service
+    restart: unless-stopped
+    depends_on:
+      auth-db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      PORT: 3001
+      DATABASE_URL: postgresql://${AUTH_DB_USER}:${AUTH_DB_PASSWORD}@auth-db:5432/${AUTH_DB_NAME:-auth}
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-1h}
+    ports:
+      - "3001:3001"
+    networks:
+      - healthcare
+
+  schedule-service:
+    build: ./schedule-service
+    restart: unless-stopped
+    depends_on:
+      schedule-db:
+        condition: service_healthy
+      mailpit:
+        condition: service_started
+    environment:
+      PORT: 3002
+      DATABASE_URL: postgresql://${SCHEDULE_DB_USER}:${SCHEDULE_DB_PASSWORD}@schedule-db:5432/${SCHEDULE_DB_NAME:-schedule}
+      AUTH_SERVICE_URL: http://auth-service:3001/graphql
+      SMTP_HOST: ${SMTP_HOST:-mailpit}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      MAIL_FROM: ${MAIL_FROM:-RATA Clinic <noreply@rata.local>}
+    ports:
+      - "3002:3002"
+    networks:
+      - healthcare
+
+networks:
+  healthcare:
+    driver: bridge
+
+volumes:
+  auth-db-data:
+  schedule-db-data:
